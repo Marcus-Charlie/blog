@@ -727,6 +727,23 @@ a.tag:hover { text-decoration: none; filter: brightness(.95); }
 .site-footer a { color: var(--text-muted); }
 .site-footer a:hover { color: var(--accent); }
 
+/* 访问统计（Vercount）
+   容器 <span id="vercount_container_*"> 的显隐由第三方脚本直接改 inline style 控制，
+   这里不要给它加 display 规则去覆盖，否则服务挂掉时容器就藏不住了。
+   需要做的就是布局和数字等宽：*/
+.site-footer__stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-md);
+}
+/* tabular-nums：数字用等宽字形，避免每次刷新读数变化时版心宽度抖动 */
+.site-footer__stats b,
+.post-header__meta b {
+  font-weight: 600;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
 /* --------------------------------------------------------------------------
    11. 响应式
    -------------------------------------------------------------------------- */

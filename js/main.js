@@ -244,9 +244,19 @@
     slot.className = 'site-footer';
     slot.innerHTML =
       '<div class="site-footer__inner">' +
-        '<p>&copy; ' + year + ' ' + escapeHtml(cfg.author || cfg.siteName || '') +
-          ' &middot; ' + escapeHtml(cfg.footerNote || '') + '</p>' +
-        icp +
+        '<div class="site-footer__info">' +
+          '<p>&copy; ' + year + ' ' + escapeHtml(cfg.author || cfg.siteName || '') +
+            ' &middot; ' + escapeHtml(cfg.footerNote || '') + '</p>' +
+          icp +
+        '</div>' +
+        // 统计数字由 Vercount 脚本填充。容器默认 display:none，
+        // 只在拿到数据后由脚本改成 inline —— 拉不到数据时整块自动消失，不会糊一个 Loading 在那儿。
+        '<div class="site-footer__stats">' +
+          '<span id="vercount_container_site_pv" style="display:none">' +
+            '总访问 <b id="vercount_value_site_pv">0</b> 次</span>' +
+          '<span id="vercount_container_site_uv" style="display:none">' +
+            '访客 <b id="vercount_value_site_uv">0</b> 人</span>' +
+        '</div>' +
       '</div>';
   }
 
@@ -261,6 +271,28 @@
   window.setPageTitle = setPageTitle;
 
   /* ------------------------------------------------------------------------
+     访问统计（Vercount）
+
+     这里用「动态插入 script」而不是在 HTML 里写 <script defer>，是有原因的：
+     统计节点是 JS 渲染出来的（页脚在这里组装，文章页 readingTime 那行由 post.js 组装），
+     而 Vercount 一上来就会做一次 getElementById 并把结果缓存住，之后不再重查。
+     defer 脚本执行时机早于或平行于 DOMContentLoaded，很容易抢在渲染之前跑完，
+     那次查询会全部拿到 null，后面节点出现了也补不上（实测：页面不再显示任何数字）。
+     所以在 boot 把该渲染的都渲染完之后再加载它，就能稳定拿到节点。
+
+     拿不到数据时 Vercount 会主动把容器保持隐藏，故不会出现卡住的 0 或 Loading。
+     ------------------------------------------------------------------------ */
+  function loadVisitCounter() {
+    try {
+      var s = document.createElement('script');
+      s.src = 'https://events.vercount.one/js';
+      s.async = true;
+      s.onerror = function () { /* 拉不到就整块隐藏，页面其余部分照常 */ };
+      document.body.appendChild(s);
+    } catch (e) { /* 忽略：统计失败不应影响站点本身 */ }
+  }
+
+  /* ------------------------------------------------------------------------
      启动
      ------------------------------------------------------------------------ */
   function boot() {
@@ -270,6 +302,8 @@
     if (typeof window.__onBoot === 'function') {
       window.__onBoot();
     }
+    // 放在最后：此时页脚 + 各页面自己的头部都已进 DOM，统计节点一定存在
+    loadVisitCounter();
   }
 
   if (document.readyState === 'loading') {

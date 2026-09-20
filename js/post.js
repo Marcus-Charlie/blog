@@ -58,6 +58,10 @@
           '<span aria-hidden="true">·</span>' +
           '<span>约 ' + (post.readingTime || 5) + ' 分钟读完</span>' +
           (tags ? '<span aria-hidden="true">·</span>' + tags : '') +
+          // 本文阅读量。分隔符一起塞进容器里，这样统计挂掉时不会留下一个孤零零的「·」
+          '<span id="vercount_container_page_pv" style="display:none">' +
+            '<span aria-hidden="true">·</span> 阅读 <b id="vercount_value_page_pv">0</b> 次' +
+          '</span>' +
         '</div>';
     }
 
