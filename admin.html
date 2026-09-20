@@ -183,7 +183,7 @@
       <h2>3 · 正文（Markdown）</h2>
       <div class="grid2">
         <div class="field">
-          <textarea id="md" placeholder="## 小标题&#10;&#10;正文段落，支持 **加粗**、*斜体*、`行内代码`、[链接](https://...)&#10;&#10;插图：![图片说明](assets/posts/xxx.jpg)&#10;（也可点下方「插入图片」自动上传并插入）&#10;&#10;- 列表项&#10;- 列表项&#10;&#10;> 引用&#10;&#10;```&#10;代码块&#10;```"></textarea>
+          <textarea id="md" placeholder="## 小标题&#10;&#10;正文段落，支持 **加粗**、*斜体*、`行内代码`、[链接](https://...)&#10;&#10;插图：![图片说明](assets/posts/xxx.jpg)&#10;（也可点下方「插入图片」自动上传并插入）&#10;&#10;表格：| 列1 | 列2 |&#10;      | --- | --- |&#10;      | a | b |&#10;&#10;公式：行内写 $E=mc^2$，独占一行写 $$E=mc^2$$&#10;&#10;- 列表项&#10;- 列表项&#10;&#10;> 引用&#10;&#10;```&#10;代码块&#10;```"></textarea>
         </div>
         <div class="field">
           <label>实时预览</label>
@@ -195,6 +195,8 @@
         <button class="btn" id="btn-post-cancel" type="button" hidden>取消编辑</button>
         <input type="file" id="img-file" accept="image/*" hidden>
         <button class="btn" id="btn-insert-img" type="button">插入图片</button>
+        <button class="btn" id="btn-insert-table" type="button">插入表格</button>
+        <button class="btn" id="btn-insert-math" type="button">插入公式</button>
         <input type="file" id="md-file" accept=".md,.markdown,.txt,text/markdown,text/plain" hidden>
         <button class="btn" id="btn-upload-md" type="button">上传 Markdown</button>
         <button class="btn" id="btn-copy" type="button">复制代码片段</button>
@@ -257,7 +259,7 @@
     var FILE_PATH  = 'data/posts.js';
     var BRANCH     = 'main';
     var TOKEN_KEY  = 'blog-admin-token';
-    var VERSION    = 'v2026-09-19.11';  // 页面顶部显示，用来确认你看到的不是缓存旧版
+    var VERSION    = 'v2026-09-20.01';  // 页面顶部显示，用来确认你看到的不是缓存旧版（本次：表格 + 公式）
 
     var $ = function (id) { return document.getElementById(id); };
 
@@ -295,11 +297,33 @@
       return String(s)
         .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
     }
+    /* ---------- 数学公式：$行内$ / $$独占一行$$ ---------- */
+    // 占位符要躲开行内代码用的 \u0000N\u0000，也躲开正文里可能出现的普通字符
+    var MATH_L = '\u0002', MATH_R = '\u0003';
+    function mathTag(list, idx) {
+      var m = list[Number(idx)];
+      if (!m) return '';
+      return '<span class="math ' + (m.block ? 'math--block' : 'math--inline') + '">' + m.tex + '</span>';
+    }
     function inline(s) {
       var out = esc(s);
       // 行内代码先占位，避免被其他规则破坏
       var codes = [];
       out = out.replace(/`([^`]+)`/g, function (_, c) { codes.push(c); return '\u0000' + (codes.length - 1) + '\u0000'; });
+      // 公式占位要排在行内代码之后（`$x$` 应当是代码），但必须在加粗/斜体之前：
+      // TeX 里的 * 和 _ 一旦落到 em/strong 规则上就会被啃掉，例如 $k_p+k_n$ 会被改成下标斜体。
+      var maths = [];
+      // 块级公式：\s* 允许写成 $$ E = mc^2 $$，内容不能是空白
+      out = out.replace(/\$\$\s*([\s\S]*?[^\s])\s*\$\$/g, function (_, t) {
+        maths.push({ tex: t, block: true });
+        return MATH_L + (maths.length - 1) + MATH_R;
+      });
+      // 行内公式：$ 后紧跟非空白非 $，内容里不允许出现换行和 $，且不能以空白结尾，
+      // 收尾的 $ 后面不许直接跟数字 —— 这几条是为了不让「价格 $100 和 $200」这种文字被误判成公式。
+      out = out.replace(/\$(?![\s$])((?:[^$\n])*?[^\s$])\$(?!\d)/g, function (_, t) {
+        maths.push({ tex: t, block: false });
+        return MATH_L + (maths.length - 1) + MATH_R;
+      });
       // 图片必须排在链接之前：否则 ![说明](a.jpg) 里的 [说明](a.jpg) 会被链接规则吃掉
       out = out.replace(/!\[([^\]]*)\]\(([^)\s]+)\)/g, '<img src="$2" alt="$1" loading="lazy">');
       out = out.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
@@ -307,8 +331,63 @@
       // 站内相对路径（如 /about.html）也支持，不只是 http(s)
       out = out.replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, '<a href="$2">$1</a>');
       out = out.replace(/\u0000(\d+)\u0000/g, function (_, i) { return '<code>' + codes[Number(i)] + '</code>'; });
+      // 公式最后还原：标签里留着原始 TeX，前台交给 KaTeX 排版；
+      // CDN 挂了的话读者看到的也还是可读的 TeX，而不是被啃过的乱码。
+      out = out.replace(/\u0002(\d+)\u0003/g, function (_, i) { return mathTag(maths, i); });
       return out;
     }
+    /* ---------- 表格（GFM） ---------- */
+    // 判定分隔行：| --- | :---: | ---: | 之类的组合。注意它也匹配单独的 ---，
+    // 所以调用方必须先确保「当前行本身含 |」，避免把分割线误当成表格。
+    function isTableDelim(l) {
+      return /^\s*\|?\s*:?-{1,}:?\s*(\|\s*:?-{1,}:?\s*)*\|?\s*$/.test(String(l || ''));
+    }
+    // 拆一行单元格：去掉首尾的 | ，并处理转义竖线 \|（否则表格里的竖线会把列撑开）
+    function splitRow(l) {
+      var t = String(l).trim();
+      if (t.charAt(0) === '|') t = t.slice(1);
+      if (t.charAt(t.length - 1) === '|' && t.charAt(t.length - 2) !== '\\') t = t.slice(0, -1);
+      var cells = [], cur = '';
+      for (var k = 0; k < t.length; k++) {
+        var ch = t.charAt(k);
+        if (ch === '\\' && t.charAt(k + 1) === '|') { cur += '|'; k++; continue; }
+        if (ch === '|') { cells.push(cur.trim()); cur = ''; continue; }
+        cur += ch;
+      }
+      cells.push(cur.trim());
+      return cells;
+    }
+    function parseAligns(l) {
+      return splitRow(l).map(function (c) {
+        var left = c.charAt(0) === ':';
+        var right = c.charAt(c.length - 1) === ':';
+        return (left && right) ? 'center' : (right ? 'right' : (left ? 'left' : ''));
+      });
+    }
+    function alignAttr(a) { return a ? ' style="text-align:' + a + '"' : ''; }
+    function renderTable(head, aligns, rows) {
+      var h = '<div class="table-wrap"><table>\n<thead>\n<tr>';
+      // 表头、表体统一按最长行的列数补齐，少一个单元格时不会整行错位
+      var n = head.length;
+      rows.forEach(function (r) { if (r.length > n) n = r.length; });
+      for (var i = 0; i < n; i++) {
+        h += '<th' + alignAttr(aligns[i]) + '>' + inline(head[i] || '') + '</th>';
+      }
+      h += '</tr>\n</thead>\n';
+      if (rows.length) {
+        h += '<tbody>\n';
+        for (var r0 = 0; r0 < rows.length; r0++) {
+          h += '<tr>';
+          for (var c0 = 0; c0 < n; c0++) {
+            h += '<td' + alignAttr(aligns[c0]) + '>' + inline(rows[r0][c0] || '') + '</td>';
+          }
+          h += '</tr>\n';
+        }
+        h += '</tbody>\n';
+      }
+      return h + '</table></div>\n';
+    }
+
     function mdToHtml(md) {
       var lines = String(md || '').replace(/\r\n/g, '\n').split('\n');
       var html = '';
@@ -360,6 +439,20 @@
           continue;
         }
 
+        // 表格：当前行含 |，且紧跟着一行分隔行 |---|:---:|---:| 时才认作表头
+        if (line.indexOf('|') >= 0 && i + 1 < lines.length && isTableDelim(lines[i + 1])) {
+          flushAll();
+          var rows = [];
+          var j = i + 2;
+          while (j < lines.length && lines[j].indexOf('|') >= 0 && lines[j].trim() !== '') {
+            rows.push(splitRow(lines[j]));
+            j++;
+          }
+          html += renderTable(splitRow(line), parseAligns(lines[i + 1]), rows);
+          i = j - 1;            // for 循环会再 +1，正好落到表格后面那一行
+          continue;
+        }
+
         // 引用
         if (/^>\s?/.test(line)) {
           flushPara(); flushList();
@@ -404,9 +497,14 @@
       var s = String(html || '').trim();
       s = s
         .replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&')
-        .replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&nbsp;/g, ' ');
+        .replace(/&quot;/g, '"').replace(/&#39;/g, "'")        .replace(/&nbsp;/g, ' ');
+      // 表格外的滚动容器只是展示用的壳，回填时先把壳脱掉，表格本身按 table 处理
+      s = s.replace(/<div class="table-wrap">([\s\S]*?)<\/div>/g, '$1');
       function inline(text) {
         return String(text)
+          // 公式先还原成 $...$ / $$...$$：TeX 里的 _ * ^ 不能再被后面的 Markdown 规则碰到
+          .replace(/<span class="math math--inline">([\s\S]*?)<\/span>/g, function (_, t) { return '$' + t + '$'; })
+          .replace(/<span class="math math--block">([\s\S]*?)<\/span>/g, function (_, t) { return '$$' + t + '$$'; })
           .replace(/<strong>([\s\S]*?)<\/strong>/g, '**$1**')
           .replace(/<b>([\s\S]*?)<\/b>/g, '**$1**')
           .replace(/<em>([\s\S]*?)<\/em>/g, '*$1*')
@@ -421,8 +519,70 @@
             return '![' + a + '](' + s + ')';
           })
       }
+      /* 表格 → Markdown。thead 第一行当表头，对齐方式从 th/td 的 style 上读回来 */
+      function tableToMd(inner) {
+        function rowsIn(src) {
+          var re2 = /<tr\b[^>]*>([\s\S]*?)<\/tr>/g, m2, arr = [];
+          while ((m2 = re2.exec(src)) !== null) arr.push(m2[1]);
+          return arr;
+        }
+        function cellsOf(row) {
+          var re2 = /<(th|td)\b([^>]*)>([\s\S]*?)<\/\1>/g, m2, arr = [];
+          while ((m2 = re2.exec(row)) !== null) {
+            var align = (String(m2[2]).match(/text-align:\s*(left|center|right)/) || [])[1] || '';
+            var txt = inline(String(m2[3])
+                .replace(/<br\s*\/?>/g, ' ')
+                .replace(/<\/?p>/g, ''))
+              .replace(/\s*\n\s*/g, ' ')
+              // 单元格里的裸竖线必须转义，否则回填后列会串位；（前面已经有 \ 的不再重复转义）
+              .replace(/(^|[^\\])\|/g, '$1\\|')
+              .trim();
+            arr.push({ text: txt, align: align });
+          }
+          return arr;
+        }
+        var thead = inner.match(/<thead\b[^>]*>([\s\S]*?)<\/thead>/);
+        var tbody = inner.match(/<tbody\b[^>]*>([\s\S]*?)<\/tbody>/);
+        var allRows = [], headRows = [], bodyRows = [];
+        if (thead || tbody) {
+          headRows = thead ? rowsIn(thead[1]) : [];
+          bodyRows = tbody ? rowsIn(tbody[1]) : [];
+        } else {
+          allRows = rowsIn(inner);
+          headRows = allRows.slice(0, 1);
+          bodyRows = allRows.slice(1);
+        }
+        // 多于一行表头不会发生（我们自己只生成一行），真遇到了就把多余的降级成表体，至少不丢内容
+        if (headRows.length > 1) {
+          bodyRows = headRows.slice(1).concat(bodyRows);
+          headRows = headRows.slice(0, 1);
+        }
+        var head = headRows.length ? cellsOf(headRows[0]) : [];
+        // 多于一行表头的情况见上面那段；这里把表体统一转成单元格
+        var body = bodyRows.map(function (r) { return cellsOf(r); });
+
+        var n = head.length;
+        body.forEach(function (r) { if (r.length > n) n = r.length; });
+        function pad(row) {
+          var a = row.slice();
+          while (a.length < n) a.push({ text: '', align: '' });
+          return a.slice(0, n);
+        }
+        function mdRow(row) { return '| ' + pad(row).map(function (c) { return c.text; }).join(' | ') + ' |'; }
+        function mdAlign(a) {
+          return a === 'center' ? ':---:' : (a === 'right' ? '---:' : (a === 'left' ? ':---' : '---'));
+        }
+        var linesOut = [];
+        if (head.length) {
+          linesOut.push(mdRow(head));
+          linesOut.push('| ' + pad(head).map(function (c) { return mdAlign(c.align); }).join(' | ') + ' |');
+        }
+        body.forEach(function (r) { linesOut.push(mdRow(r)); });
+        return linesOut.join('\n');
+      }
+
       var out = [];
-      var re = /<(h2|h3|h4|p|blockquote|pre|ul|ol)\b([^>]*)>([\s\S]*?)<\/\1>|<hr\s*\/?>/g;
+      var re = /<(h2|h3|h4|p|blockquote|pre|ul|ol|table)\b([^>]*)>([\s\S]*?)<\/\1>|<hr\s*\/?>/g;
       var m;
       while ((m = re.exec(s)) !== null) {
         var tag = m[1];
@@ -435,6 +595,7 @@
         else if (tag === 'h4') out.push('### ' + inline(inner).trim());
         else if (tag === 'p') out.push(inline(inner).trim());
         else if (tag === 'hr') out.push('---');
+        else if (tag === 'table') out.push(tableToMd(inner));
         else if (tag === 'blockquote') out.push('> ' + inline(inner).replace(/\n+/g, '\n> ').trim());
         else if (tag === 'pre') {
           var code = inner.replace(/^<code>([\s\S]*?)<\/code>$/, '$1');
@@ -533,10 +694,72 @@
     }
 
     /* ---------- 预览 ---------- */
+    /* 公式预览：和前台同一个策略 —— 预览里真的出现公式才去拉 KaTeX，
+       平时一个请求都不发；拉不到就保留原始 TeX，不挡着写文章。 */
+    var katexPromise = null;
+    var KATEX_CDNS = [
+      'https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/',
+      'https://unpkg.com/katex@0.16.11/dist/',
+      'https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.11/'
+    ];
+    function tryKatex(base) {
+      return new Promise(function (resolve, reject) {
+        var link = document.createElement('link');
+        link.rel = 'stylesheet';
+        link.href = base + 'katex.min.css';
+        document.head.appendChild(link);
+        var s = document.createElement('script');
+        s.src = base + 'katex.min.js';
+        s.async = true;
+        s.onload = function () { resolve(window.katex || null); };
+        s.onerror = function () {
+          if (s.parentNode) s.parentNode.removeChild(s);
+          reject(new Error('katex 加载失败：' + base));
+        };
+        document.head.appendChild(s);
+      });
+    }
+    function loadKatex() {
+      if (window.katex) return Promise.resolve(window.katex);
+      if (katexPromise) return katexPromise;
+      var chain = Promise.reject();
+      KATEX_CDNS.forEach(function (base) {
+        chain = chain['catch'](function () { return tryKatex(base); });
+      });
+      katexPromise = chain['catch'](function () {
+        katexPromise = null;
+        throw new Error('katex 全部 CDN 均不可用');
+      });
+      return katexPromise;
+    }
+    function renderMathIn(root) {
+      var nodes = root.querySelectorAll('.math');
+      var list = [];
+      for (var i = 0; i < nodes.length; i++) {
+        if (!nodes[i].getAttribute('data-math')) list.push(nodes[i]);
+      }
+      if (!list.length) return;
+      loadKatex().then(function (katex) {
+        if (!katex) return;
+        list.forEach(function (el) {
+          var tex = el.textContent;
+          // 先打标记：KaTeX 会替换掉容器里的内容，标记能防止同一个公式被反复排版
+          el.setAttribute('data-math', '1');
+          try {
+            katex.render(tex, el, {
+              display: el.className.indexOf('math--block') >= 0,
+              throwOnError: false
+              // 保留 KaTeX 默认的 htmlAndMathml 输出，读屏软件读得到公式
+            });
+          } catch (e) { el.setAttribute('data-math', 'error'); }
+        });
+      })['catch'](function () { /* CDN 不可用时保持原样即可 */ });
+    }
     function renderPreview() {
       try {
         var html = mdToHtml($('md').value);
         $('preview').innerHTML = html || '<p style="color:var(--text-faint)">左边开始写，这里会实时预览。</p>';
+        renderMathIn($('preview'));
       } catch (e) {
         $('preview').innerHTML = '<p style="color:#b42318">预览出错：' + esc(e.message) + '</p>';
       }
@@ -1436,6 +1659,19 @@
       });
 
       $('md').addEventListener('input', renderPreview);
+
+      // 表格 / 公式：直接插一段能用的样例，省得每次去翻语法
+      $('btn-insert-table').addEventListener('click', function () {
+        insertAtCursor(
+          '\n| 方案 | 带宽 (Hz) | 备注 |\n' +
+          '| :--- | :-------: | --- |\n' +
+          '| A | 12 | 说明 |\n' +
+          '| B | 18 | 说明 |\n'
+        );
+      });
+      $('btn-insert-math').addEventListener('click', function () {
+        insertAtCursor('\n$$\nE = mc^2\n$$\n');
+      });
 
       // 插图：点按钮 → 弹出选文件 → 上传后在光标处插入 ![alt](path)
       $('btn-insert-img').addEventListener('click', function () { $('img-file').click(); });

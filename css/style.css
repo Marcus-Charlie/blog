@@ -614,6 +614,67 @@ a.tag:hover { text-decoration: none; filter: brightness(.95); }
   margin-block: var(--space-lg);
 }
 
+/* ---------- 表格 ---------- */
+/* mdToHtml 会给每个表格套一层 .table-wrap：窄屏时让表格自己横向滚动，
+   而不是把整页撑宽、让整页出现横向滚动条。回填 Markdown 时这层壳会被脱掉。 */
+.table-wrap {
+  margin: var(--space-lg) 0;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+.prose table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 0;
+  font-size: .9375rem;
+  line-height: 1.65;
+}
+/* 没有 .table-wrap 包着的老表格（手工写的 HTML）也要有间距 */
+.prose > table { margin: var(--space-lg) 0; }
+.prose th,
+.prose td {
+  padding: .5rem .75rem;
+  border: 1px solid var(--border);
+  vertical-align: top;
+}
+.prose thead th {
+  background: var(--bg-soft);
+  font-weight: 600;
+  text-align: left;
+  white-space: nowrap;
+}
+.prose tbody th { font-weight: 600; }
+
+/* ---------- 公式（KaTeX） ---------- */
+/* 未渲染时（CDN 拉不到）容器里是原始 TeX，用等宽字体表示「这是源码不是正文」 */
+.prose .math:not([data-math]) {
+  font-family: var(--font-mono);
+  font-size: .9em;
+  color: var(--text-muted);
+  background: var(--bg-soft);
+  padding: .1em .35em;
+  border-radius: var(--radius-sm);
+}
+.prose .math--block:not([data-math]) {
+  display: block;
+  padding: var(--space-sm) var(--space-md);
+  overflow-x: auto;
+  white-space: pre-wrap;
+}
+.prose .math--block {
+  display: block;
+  margin: var(--space-lg) 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+.prose .math--error {
+  color: #b42318;
+  font-family: var(--font-mono);
+  font-size: .9em;
+}
+/* KaTeX 的 display 模式自带 margin，这里压掉外层多余的量 */
+.prose .katex-display { margin: 0; }
+
 .prose hr {
   border: 0;
   border-top: 1px solid var(--border);

@@ -271,6 +271,96 @@
   window.setPageTitle = setPageTitle;
 
   /* ------------------------------------------------------------------------
+     公式渲染（KaTeX，用到才加载）
+
+     后台写文章时把 $...$ / $$...$$ 渲染成
+       <span class="math math--inline">原始 TeX</span>
+       <span class="math math--block">原始 TeX</span>
+     这里负责把容器里的 TeX 换成排版后的公式。
+
+     两个刻意的设计：
+     1) 按需加载 —— 页面上没有 .math 就完全不发 CDN 请求，写普通文章时零成本；
+     2) 失败可退 —— KaTeX 拉不到（墙、CDN 挂、离线）时容器里的原始 TeX 仍然可读，
+        页面不会出现一片空白，也不影响其他内容。
+     ------------------------------------------------------------------------ */
+  // 三个源按顺序试：jsDelivr 一般最快，unpkg / cdnjs 作为国内抽风时的退路。
+  // 全挂了也不打紧 —— 容器里保留原始 TeX，文章照样能读。
+  var KATEX_CDNS = [
+    'https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/',
+    'https://unpkg.com/katex@0.16.11/dist/',
+    'https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.11/'
+  ];
+  var katexLoading = null;
+
+  function tryKatex(base) {
+    return new Promise(function (resolve, reject) {
+      var link = document.createElement('link');
+      link.rel = 'stylesheet';
+      link.href = base + 'katex.min.css';
+      document.head.appendChild(link);
+
+      var s = document.createElement('script');
+      s.src = base + 'katex.min.js';
+      s.async = true;
+      s.onload = function () {
+        resolve(window.katex || null);
+      };
+      s.onerror = function () {
+        if (s.parentNode) s.parentNode.removeChild(s);
+        reject(new Error('katex 加载失败：' + base));
+      };
+      document.head.appendChild(s);
+    });
+  }
+
+  function loadKatex() {
+    // 页面如果自己已经引了 KaTeX（例如以后想做离线版），直接用它，不再走 CDN
+    if (window.katex) return Promise.resolve(window.katex);
+    if (katexLoading) return katexLoading;
+    var chain = Promise.reject();
+    KATEX_CDNS.forEach(function (base) {
+      chain = chain['catch'](function () { return tryKatex(base); });
+    });
+    katexLoading = chain['catch'](function () {
+      katexLoading = null;               // 这次认栽，下次有机会再试
+      throw new Error('katex 全部 CDN 均不可用');
+    });
+    return katexLoading;
+  }
+
+  /** 把 root 内所有未渲染过的公式容器排版一遍；返回 Promise */
+  function renderMath(root) {
+    var scope = root || document.body;
+    var nodes = scope.querySelectorAll ? scope.querySelectorAll('.math') : [];
+    var list = [];
+    for (var i = 0; i < nodes.length; i++) {
+      if (!nodes[i].getAttribute('data-math')) list.push(nodes[i]);
+    }
+    if (!list.length) return Promise.resolve();
+
+    return loadKatex().then(function (katex) {
+      if (!katex) return;
+      list.forEach(function (el) {
+        var tex = el.textContent;
+        // 先打标记再渲染：KaTeX 会替换掉里面的内容，标记能避免被重复排版
+        el.setAttribute('data-math', '1');
+        try {
+          katex.render(tex, el, {
+            display: el.className.indexOf('math--block') >= 0,
+            throwOnError: false
+            // 不指定 output：保留 KaTeX 默认的 htmlAndMathml，读屏软件读得到公式内容
+          });
+        } catch (e) {
+          el.setAttribute('data-math', 'error');
+        }
+      });
+    })['catch'](function () {
+      /* CDN 不可用时什么都不做：容器里保留原始 TeX */
+    });
+  }
+  window.renderMath = renderMath;
+
+  /* ------------------------------------------------------------------------
      访问统计（Vercount）
 
      这里用「动态插入 script」而不是在 HTML 里写 <script defer>，是有原因的：

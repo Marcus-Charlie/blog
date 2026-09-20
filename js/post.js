@@ -70,6 +70,8 @@
     if (body) {
       // post.content 是站主自己写的 HTML 片段，直接注入
       body.innerHTML = post.content || '<p>这篇文章还没有内容。</p>';
+      // 正文里若有公式容器，交给 KaTeX 排版（没有公式时这个函数什么都不做）
+      if (typeof renderMath === 'function') renderMath(body);
     }
 
     // --- 底部：标签 + 上下篇 ---
