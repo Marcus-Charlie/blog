@@ -25,19 +25,7 @@ window.posts = [
     "readingTime": 5,
     "content": "<h3>测试</h3>\n<p><img src=\"assets/posts/img-20260919-161553.jpg\" alt=\"OIP-C\" loading=\"lazy\"></p>"
   },
-{
-    "id": "1",
-    "title": "1",
-    "date": "2026-09-19",
-    "tags": [
-      "1"
-    ],
-    "excerpt": "1",
-    "cover": "",
-    "readingTime": 5,
-    "content": "<p>1<img src=\"assets/posts/img-20260919-154726.jpg\" alt=\"OIP-C\" loading=\"lazy\"></p>"
-  },
-{
+  {
     "id": "韦根论文逻辑",
     "title": "韦根论文逻辑",
     "date": "2026-09-19",
